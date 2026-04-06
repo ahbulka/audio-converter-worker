@@ -173,9 +173,13 @@ app.post("/convert-base64", async (req, res) => {
     const outputBuffer = fs.readFileSync(tempOutput)
     const outputSize = outputBuffer.length
 
+    // Sanitize output path to remove non-ASCII characters
+    const sanitizedPath = outputPath.replace(/[^\x00-\x7F]/g, '_')
+    console.log(`[convert-base64] Sanitized path: ${sanitizedPath}`)
+
     const { error: uploadError } = await supabase.storage
       .from('chat-media')
-      .upload(outputPath, outputBuffer, {
+      .upload(sanitizedPath, outputBuffer, {
         contentType: "audio/webm",
         upsert: true,
       })
@@ -188,7 +192,7 @@ app.post("/convert-base64", async (req, res) => {
     // Get public URL
     const { data: { publicUrl } } = supabase.storage
       .from('chat-media')
-      .getPublicUrl(outputPath)
+      .getPublicUrl(sanitizedPath)
 
     console.log(`[convert-base64] Success: ${publicUrl}`)
 
@@ -198,7 +202,7 @@ app.post("/convert-base64", async (req, res) => {
     res.json({
       success: true,
       publicUrl,
-      convertedPath: outputPath,
+      convertedPath: sanitizedPath,
       duration: duration || 0,
       sizeBytes: outputSize,
       mimeType: "audio/webm",
