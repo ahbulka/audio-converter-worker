@@ -25,26 +25,13 @@ app.post("/convert", async (req, res) => {
 
   const tempInput = `/tmp/${messageId || clientId || Date.now()}_input`
   const tempOutput = `/tmp/${messageId || clientId || Date.now()}_converted.webm`
-  
-  // Decode Base64 storage path
-  const decodedStoragePath = Buffer.from(storagePath, 'base64').toString('utf8')
+
+  // URL-decode storage path (received as URL-encoded from client)
+  const decodedStoragePath = decodeURIComponent(storagePath)
   console.log(`[convert] Starting conversion for ${messageId || clientId}`)
-  console.log(`[convert] Received Base64: ${storagePath.substring(0, 50)}...`)
+  console.log(`[convert] Received encoded: ${storagePath.substring(0, 50)}...`)
   console.log(`[convert] Decoded path: ${decodedStoragePath}`)
   console.log(`[convert] Received bucket: ${bucket}`)
-  console.log(`[convert] Storage path length: ${storagePath.length}`)
-  
-  // Show character codes for debugging
-  let charCodes = []
-  for (let i = 0; i < Math.min(storagePath.length, 50); i++) {
-    charCodes.push(storagePath.charCodeAt(i))
-  }
-  console.log(`[convert] First 50 char codes: ${charCodes.join(',')}`)
-  
-  // Check for non-ASCII at index 26 specifically
-  if (storagePath.length > 26) {
-    console.log(`[convert] Char at index 26: ${storagePath.charCodeAt(26)} (${storagePath[26]})`)
-  }
 
   try {
     // Step 1: Get signed URL and download via fetch
