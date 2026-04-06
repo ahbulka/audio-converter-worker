@@ -1,112 +1,119 @@
 import express from "express"
-import multer from "multer"
 import { exec } from "child_process"
 import fs from "fs"
 import { createClient } from "@supabase/supabase-js"
 
 const app = express()
-const upload = multer({ dest: "/tmp/uploads/" })
+app.use(express.json())
 
-// Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 )
 
-// Health check
 app.get("/", (req, res) => {
   res.json({ status: "ok", service: "audio-converter" })
 })
 
-// Convert audio endpoint
-app.post("/convert", upload.single("audio"), async (req, res) => {
-  const inputPath = req.file?.path
-  const messageId = req.body?.messageId || `msg_${Date.now()}`
-  const bucket = req.body?.bucket || "audio"
-  const inputStoragePath = req.body?.storagePath
-
-  if (!inputPath) {
-    return res.status(400).json({ error: "No audio file provided" })
+// Convert audio endpoint - downloads from Supabase, converts, uploads back
+app.post("/convert", async (req, res) => {
+  const { messageId, bucket, storagePath, clientId } = req.body
+  
+  if (!storagePath || !bucket) {
+    return res.status(400).json({ error: "Missing storagePath or bucket" })
   }
 
-  const tempOutput = `/tmp/${messageId}_converted.webm`
+  const tempInput = `/tmp/${messageId || clientId || Date.now()}_input`
+  const tempOutput = `/tmp/${messageId || clientId || Date.now()}_converted.webm`
   
-  console.log(`[convert] Starting conversion for ${messageId}`)
+  console.log(`[convert] Starting conversion for ${messageId || clientId}`)
+  console.log(`[convert] Downloading from ${bucket}/${storagePath}`)
 
-  // FFmpeg command: Convert any format to WebM/Opus
-  // -ar 48000: 48kHz sample rate
-  // -ac 1: Mono channel
-  // -c:a libopus: Opus codec
-  // -b:a 32k: 32kbps bitrate (small files, good quality)
-  const cmd = `ffmpeg -i "${inputPath}" -vn -ar 48000 -ac 1 -c:a libopus -b:a 32k -f webm "${tempOutput}"`
-
-  exec(cmd, async (err, stdout, stderr) => {
-    // Cleanup input file
-    try { fs.unlinkSync(inputPath) } catch {}
-
-    if (err) {
-      console.error(`[convert] FFmpeg error for ${messageId}:`, err)
-      return res.status(500).json({ 
-        error: "Conversion failed", 
-        details: err.message 
-      })
+  try {
+    // Step 1: Download from Supabase
+    const { data: fileData, error: downloadError } = await supabase.storage
+      .from(bucket)
+      .download(storagePath)
+    
+    if (downloadError || !fileData) {
+      console.error(`[convert] Download error:`, downloadError)
+      throw new Error(`Failed to download: ${downloadError?.message || 'Unknown error'}`)
     }
 
-    console.log(`[convert] FFmpeg success for ${messageId}`)
+    // Write to temp file
+    const buffer = Buffer.from(await fileData.arrayBuffer())
+    fs.writeFileSync(tempInput, buffer)
+    console.log(`[convert] Downloaded ${buffer.length} bytes`)
 
-    try {
-      // Read converted file
-      const outputBuffer = fs.readFileSync(tempOutput)
-      const outputSize = outputBuffer.length
-      
-      // Generate output path
-      const outputFileName = `${messageId}_converted.webm`
-      const outputStoragePath = inputStoragePath 
-        ? inputStoragePath.replace(/\.[^.]+$/, '.webm')
-        : `converted/${outputFileName}`
+    // Step 2: FFmpeg conversion
+    const cmd = `ffmpeg -i "${tempInput}" -vn -ar 48000 -ac 1 -c:a libopus -b:a 32k -f webm "${tempOutput}"`
+    
+    await new Promise((resolve, reject) => {
+      exec(cmd, (err, stdout, stderr) => {
+        // Cleanup input
+        try { fs.unlinkSync(tempInput) } catch {}
+        
+        if (err) {
+          console.error(`[convert] FFmpeg error:`, err)
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
 
-      // Upload to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(outputStoragePath, outputBuffer, {
-          contentType: "audio/webm",
-          upsert: true,
-        })
+    console.log(`[convert] FFmpeg success`)
 
-      if (uploadError) {
-        console.error(`[convert] Upload error for ${messageId}:`, uploadError)
-        throw uploadError
-      }
+    // Step 3: Read output and upload
+    const outputBuffer = fs.readFileSync(tempOutput)
+    const outputSize = outputBuffer.length
+    
+    const outputStoragePath = storagePath.replace(/\.[^.]+$/, '.webm')
 
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from(bucket)
-        .getPublicUrl(outputStoragePath)
-
-      console.log(`[convert] Success for ${messageId}: ${publicUrl}`)
-
-      // Cleanup output file
-      try { fs.unlinkSync(tempOutput) } catch {}
-
-      res.json({
-        success: true,
-        messageId,
-        originalPath: inputStoragePath,
-        convertedPath: outputStoragePath,
-        publicUrl,
-        sizeBytes: outputSize,
-        mimeType: "audio/webm",
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(outputStoragePath, outputBuffer, {
+        contentType: "audio/webm",
+        upsert: true,
       })
 
-    } catch (error) {
-      console.error(`[convert] Processing error for ${messageId}:`, error)
-      try { fs.unlinkSync(tempOutput) } catch {}
-      res.status(500).json({ 
-        error: "Processing failed", 
-        details: error.message 
-      })
+    if (uploadError) {
+      console.error(`[convert] Upload error:`, uploadError)
+      throw uploadError
     }
-  })
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from(bucket)
+      .getPublicUrl(outputStoragePath)
+
+    console.log(`[convert] Success: ${publicUrl}`)
+
+    // Cleanup
+    try { fs.unlinkSync(tempOutput) } catch {}
+
+    res.json({
+      success: true,
+      messageId,
+      clientId,
+      originalPath: storagePath,
+      convertedPath: outputStoragePath,
+      publicUrl,
+      sizeBytes: outputSize,
+      mimeType: "audio/webm",
+    })
+
+  } catch (error) {
+    console.error(`[convert] Error:`, error)
+    // Cleanup
+    try { fs.unlinkSync(tempInput) } catch {}
+    try { fs.unlinkSync(tempOutput) } catch {}
+    
+    res.status(500).json({ 
+      error: "Conversion failed", 
+      details: error.message 
+    })
+  }
 })
 
 // Status endpoint (for checking if worker is healthy)
