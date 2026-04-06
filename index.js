@@ -30,18 +30,23 @@ app.post("/convert", async (req, res) => {
   console.log(`[convert] Downloading from ${bucket}/${storagePath}`)
 
   try {
-    // Step 1: Download from Supabase
-    const { data: fileData, error: downloadError } = await supabase.storage
+    // Step 1: Get signed URL and download via fetch (avoids Supabase client encoding issues)
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from(bucket)
-      .download(storagePath)
+      .createSignedUrl(storagePath, 60)
     
-    if (downloadError || !fileData) {
-      console.error(`[convert] Download error:`, downloadError)
-      throw new Error(`Failed to download: ${downloadError?.message || 'Unknown error'}`)
+    if (signedUrlError || !signedUrlData?.signedUrl) {
+      throw new Error(`Failed to create signed URL: ${signedUrlError?.message}`)
     }
 
-    // Write to temp file
-    const buffer = Buffer.from(await fileData.arrayBuffer())
+    // Download via fetch
+    const fetchResponse = await fetch(signedUrlData.signedUrl)
+    if (!fetchResponse.ok) {
+      throw new Error(`Download failed: ${fetchResponse.status}`)
+    }
+
+    const arrayBuffer = await fetchResponse.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
     fs.writeFileSync(tempInput, buffer)
     console.log(`[convert] Downloaded ${buffer.length} bytes`)
 
