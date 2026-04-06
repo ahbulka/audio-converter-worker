@@ -48,9 +48,8 @@ app.post("/convert", async (req, res) => {
 
   try {
     // Step 1: Get signed URL and download via fetch
-    // Sanitize path to remove non-ASCII characters for Supabase client
-    const sanitizedPath = storagePath.replace(/[^\x00-\x7F]/g, '')
-    console.log(`[convert] Original path: ${storagePath}`)
+    // Use decoded path for Supabase operations
+    const sanitizedPath = decodedStoragePath.replace(/[^\x00-\x7F]/g, '')
     console.log(`[convert] Sanitized path: ${sanitizedPath}`)
     
     const { data: signedUrlData, error: signedUrlError } = await supabase.storage
@@ -95,7 +94,7 @@ app.post("/convert", async (req, res) => {
     const outputBuffer = fs.readFileSync(tempOutput)
     const outputSize = outputBuffer.length
     
-    const outputStoragePath = storagePath.replace(/\.[^.]+$/, '.webm')
+    const outputStoragePath = sanitizedPath.replace(/\.[^.]+$/, '.webm')
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
