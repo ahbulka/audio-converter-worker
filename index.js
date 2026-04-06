@@ -30,10 +30,15 @@ app.post("/convert", async (req, res) => {
   console.log(`[convert] Downloading from ${bucket}/${storagePath}`)
 
   try {
-    // Step 1: Get signed URL and download via fetch (avoids Supabase client encoding issues)
+    // Step 1: Get signed URL and download via fetch
+    // Sanitize path to remove non-ASCII characters for Supabase client
+    const sanitizedPath = storagePath.replace(/[^\x00-\x7F]/g, '')
+    console.log(`[convert] Original path: ${storagePath}`)
+    console.log(`[convert] Sanitized path: ${sanitizedPath}`)
+    
     const { data: signedUrlData, error: signedUrlError } = await supabase.storage
       .from(bucket)
-      .createSignedUrl(storagePath, 60)
+      .createSignedUrl(sanitizedPath, 60)
     
     if (signedUrlError || !signedUrlData?.signedUrl) {
       throw new Error(`Failed to create signed URL: ${signedUrlError?.message}`)
