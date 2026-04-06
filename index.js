@@ -31,11 +31,9 @@ app.post("/convert", async (req, res) => {
 
   try {
     // Step 1: Download from Supabase
-    // Encode path properly for non-ASCII characters
-    const encodedPath = encodeURIComponent(storagePath)
     const { data: fileData, error: downloadError } = await supabase.storage
       .from(bucket)
-      .download(encodedPath)
+      .download(storagePath)
     
     if (downloadError || !fileData) {
       console.error(`[convert] Download error:`, downloadError)
