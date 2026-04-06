@@ -26,11 +26,11 @@ app.post("/convert", async (req, res) => {
   const tempInput = `/tmp/${messageId || clientId || Date.now()}_input`
   const tempOutput = `/tmp/${messageId || clientId || Date.now()}_converted.webm`
   
-  // Decode URL encoded storage path
-  const decodedStoragePath = decodeURIComponent(storagePath)
+  // Decode Base64 storage path
+  const decodedStoragePath = Buffer.from(storagePath, 'base64').toString('utf8')
   console.log(`[convert] Starting conversion for ${messageId || clientId}`)
-  console.log(`[convert] Received storagePath (raw): ${JSON.stringify(storagePath)}`)
-  console.log(`[convert] Decoded storagePath: ${JSON.stringify(decodedStoragePath)}`)
+  console.log(`[convert] Received Base64: ${storagePath.substring(0, 50)}...`)
+  console.log(`[convert] Decoded path: ${decodedStoragePath}`)
   console.log(`[convert] Received bucket: ${bucket}`)
   console.log(`[convert] Storage path length: ${storagePath.length}`)
   
