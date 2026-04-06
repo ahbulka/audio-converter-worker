@@ -27,7 +27,21 @@ app.post("/convert", async (req, res) => {
   const tempOutput = `/tmp/${messageId || clientId || Date.now()}_converted.webm`
   
   console.log(`[convert] Starting conversion for ${messageId || clientId}`)
-  console.log(`[convert] Downloading from ${bucket}/${storagePath}`)
+  console.log(`[convert] Received storagePath (raw): ${JSON.stringify(storagePath)}`)
+  console.log(`[convert] Received bucket: ${bucket}`)
+  console.log(`[convert] Storage path length: ${storagePath.length}`)
+  
+  // Show character codes for debugging
+  let charCodes = []
+  for (let i = 0; i < Math.min(storagePath.length, 50); i++) {
+    charCodes.push(storagePath.charCodeAt(i))
+  }
+  console.log(`[convert] First 50 char codes: ${charCodes.join(',')}`)
+  
+  // Check for non-ASCII at index 26 specifically
+  if (storagePath.length > 26) {
+    console.log(`[convert] Char at index 26: ${storagePath.charCodeAt(26)} (${storagePath[26]})`)
+  }
 
   try {
     // Step 1: Get signed URL and download via fetch
