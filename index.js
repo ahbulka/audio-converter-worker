@@ -129,6 +129,94 @@ app.post("/convert", async (req, res) => {
   }
 })
 
+// Convert base64 audio endpoint - receives audio directly, converts, uploads
+app.post("/convert-base64", async (req, res) => {
+  const { base64Audio, outputPath, duration, sizeBytes } = req.body
+
+  if (!base64Audio || !outputPath) {
+    return res.status(400).json({ error: "Missing base64Audio or outputPath" })
+  }
+
+  const tempInput = `/tmp/${Date.now()}_input.m4a`
+  const tempOutput = `/tmp/${Date.now()}_converted.webm`
+
+  console.log(`[convert-base64] Starting conversion`)
+  console.log(`[convert-base64] Output path: ${outputPath}`)
+  console.log(`[convert-base64] Input size: ${base64Audio.length} chars`)
+
+  try {
+    // Step 1: Decode base64 and write to temp file
+    const audioBuffer = Buffer.from(base64Audio, 'base64')
+    fs.writeFileSync(tempInput, audioBuffer)
+    console.log(`[convert-base64] Decoded ${audioBuffer.length} bytes`)
+
+    // Step 2: FFmpeg conversion to WebM/Opus
+    const cmd = `ffmpeg -i "${tempInput}" -vn -ar 48000 -ac 1 -c:a libopus -b:a 32k -f webm "${tempOutput}"`
+
+    await new Promise((resolve, reject) => {
+      exec(cmd, (err, stdout, stderr) => {
+        // Cleanup input
+        try { fs.unlinkSync(tempInput) } catch {}
+
+        if (err) {
+          console.error(`[convert-base64] FFmpeg error:`, err)
+          reject(err)
+          return
+        }
+        resolve()
+      })
+    })
+
+    console.log(`[convert-base64] FFmpeg success`)
+
+    // Step 3: Read output and upload to Supabase
+    const outputBuffer = fs.readFileSync(tempOutput)
+    const outputSize = outputBuffer.length
+
+    const { error: uploadError } = await supabase.storage
+      .from('chat-media')
+      .upload(outputPath, outputBuffer, {
+        contentType: "audio/webm",
+        upsert: true,
+      })
+
+    if (uploadError) {
+      console.error(`[convert-base64] Upload error:`, uploadError)
+      throw uploadError
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('chat-media')
+      .getPublicUrl(outputPath)
+
+    console.log(`[convert-base64] Success: ${publicUrl}`)
+
+    // Cleanup
+    try { fs.unlinkSync(tempOutput) } catch {}
+
+    res.json({
+      success: true,
+      publicUrl,
+      convertedPath: outputPath,
+      duration: duration || 0,
+      sizeBytes: outputSize,
+      mimeType: "audio/webm",
+    })
+
+  } catch (error) {
+    console.error(`[convert-base64] Error:`, error)
+    // Cleanup
+    try { fs.unlinkSync(tempInput) } catch {}
+    try { fs.unlinkSync(tempOutput) } catch {}
+
+    res.status(500).json({
+      error: "Conversion failed",
+      details: error.message
+    })
+  }
+})
+
 // Status endpoint (for checking if worker is healthy)
 app.get("/status", (req, res) => {
   exec("ffmpeg -version", (err, stdout) => {
